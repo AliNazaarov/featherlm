@@ -1,0 +1,71 @@
+{
+ "pairs": "O3c_glm_prompt_harness_style vs frontier-strong:claude-opus-5-5",
+ "sources": {
+  "page": {
+   "ours": 58,
+   "theirs": 87,
+   "both_fine": 50,
+   "neither": 0,
+   "people": 41,
+   "votes": 195,
+   "win_rate": 0.4,
+   "lo": 0.31961486150718893,
+   "hi": 0.48455804977806266,
+   "sign_test_p": 0.01974093986302583,
+   "sensitivity_no_position_clickers": {
+    "ours": 42,
+    "theirs": 71,
+    "both_fine": 27,
+    "neither": 0,
+    "people": 30,
+    "votes": 140,
+    "win_rate": 0.37168141592920356,
+    "lo": 0.28263100797989876,
+    "hi": 0.4676347962649451,
+    "sign_test_p": 0.00814969137377117,
+    "dropped_ballots": [
+     "pub:bmvzqw3hdj8y7",
+     "pub:bmvzqwssd3fxe",
+     "pub:bmvzqz3klruzd",
+     "pub:bmvzqzvg0s20a",
+     "pub:bmvzraxffnh1j",
+     "pub:bmvzscycvfet6",
+     "pub:bmvzsondqwy74",
+     "pub:bmvzss1q7q50s",
+     "pub:bmvztjlugqzn2",
+     "pub:bmvztjt76vrnj",
+     "pub:bmvztjw9atx8d"
+    ],
+    "position_only": [
+     "pub:bmvzscycvfet6"
+    ],
+    "too_fast": [
+     "pub:bmvzqw3hdj8y7",
+     "pub:bmvzqwssd3fxe",
+     "pub:bmvzqz3klruzd",
+     "pub:bmvzqzvg0s20a",
+     "pub:bmvzraxffnh1j",
+     "pub:bmvzscycvfet6",
+     "pub:bmvzsondqwy74",
+     "pub:bmvzss1q7q50s",
+     "pub:bmvztjlugqzn2",
+     "pub:bmvztjt76vrnj",
+     "pub:bmvztjw9atx8d"
+    ]
+   },
+   "voter": "includes one founder ballot (Ali, venue laptop: a check, not a gold rater); the other readers are public-page visitors",
+   "note": "Ali reports 5 Minerva classmates gave the same answer (preferred the Claude side) in an informal, unlogged session; not counted as data.",
+   "pattern": "Ours over-uses dramatic fragments, repetition for effect and punchy one-line closers (e.g. 'Six minutes.', 'Click, compare, delete.' twice, 'You did the work. Get paid for it.'); Claude writes calm complete sentences. Fix tested as row O3f_glm_calm."
+  }
+ },
+ "pooled": {
+  "ours": 58,
+  "theirs": 87,
+  "both_fine": 50,
+  "neither": 0,
+  "win_rate": 0.4,
+  "lo": 0.31961486150718893,
+  "hi": 0.48455804977806266,
+  "sign_test_p": 0.01974093986302583
+ }
+}

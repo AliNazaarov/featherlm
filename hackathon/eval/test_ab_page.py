@@ -1,0 +1,142 @@
+"""Offline tests for the blind A/B page helpers (hackathon/demo/ab_page)."""
+import importlib.util, json, os, tempfile, unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PAGE = os.path.normpath(os.path.join(HERE, "../demo/ab_page"))
+
+
+def _load(name):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(PAGE, name + ".py"))
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m
+
+
+bp, ev = _load("build_pairs"), _load("export_votes")
+
+AB = {"meta": {"x": "x.jsonl", "y": "y.jsonl", "seed": 0, "n": 2}, "pairs": [
+    {"pid": 1, "id": "dev-001", "draft": "d1", "a": "a1", "b": "b1", "a_system": "sys-z", "b_system": "sys-k"},
+    {"pid": 2, "id": "trick-01", "draft": "d2", "a": "a2", "b": "b2", "a_system": "sys-k", "b_system": "sys-z"}]}
+VER = bp.version(AB)
+
+
+class TestBuildPairs(unittest.TestCase):
+    def test_no_system_names_published(self):
+        txt = json.dumps(bp.public(AB))
+        self.assertNotIn("sys-z", txt); self.assertNotIn("sys-k", txt); self.assertNotIn("_system", txt)
+
+    def test_groups_consistent_and_recoverable(self):
+        for flip in (False, True):
+            pub = bp.public(AB, flip=flip)
+            m = bp.reveal_map(AB, pub)
+            self.assertEqual(sorted(m), ["X", "Y"]); self.assertEqual(sorted(m.values()), ["sys-k", "sys-z"])
+            for q, p in zip(pub["pairs"], AB["pairs"]):
+                self.assertEqual(m[q["a_group"]], p["a_system"]); self.assertEqual(m[q["b_group"]], p["b_system"])
+
+    def test_version_tracks_text(self):
+        self.assertEqual(bp.public(AB)["meta"]["version"], VER)
+        changed = {"meta": AB["meta"], "pairs": [dict(AB["pairs"][0], a="other"), AB["pairs"][1]]}
+        self.assertNotEqual(bp.version(changed), VER)
+
+    def test_rejects_same_system_pair(self):
+        bad = {"meta": AB["meta"], "pairs": [dict(AB["pairs"][0], b_system="sys-z")]}
+        with self.assertRaises(ValueError):
+            bp.public(bad)
+
+
+class TestExportVotes(unittest.TestCase):
+    PUB = bp.public(AB, flip=False)  # sys-k -> X, sys-z -> Y
+    SETS = {VER: ev.pair_set(AB, PUB)}
+    DUMP = [{"id": "u_1", "data": {"ballots": {
+        "b1": {"version": VER, "picks": {"1": {"pick": "a", "first": "b", "reason": "warmer"}, "2": {"pick": "tie", "first": "a"}}},
+        "b2": {"version": VER, "picks": {"2": {"pick": "b", "first": "a"}, "9": {"pick": "a"}, "1": {"pick": ""}}},
+        "b3": {"version": "0ld0ld0ld0ld0ld0", "picks": {"1": {"pick": "a"}}}}}}]
+
+    def test_store_maps_votes_to_systems(self):
+        dropped = []
+        rs = ev.from_store(self.DUMP, self.SETS, dropped)
+        self.assertEqual(len(rs), 3)  # unknown pid 9, blank pick and the other-version ballot are skipped
+        self.assertEqual([d[1] for d in dropped], ["b3"])
+        r = rs[0]
+        self.assertEqual((r["source"], r["ballot"], r["pid"], r["vote"], r["winner"], r["first_shown"]),
+                         ("page", "b1", 1, "A", "sys-z", "b"))
+        self.assertEqual([r["vote"] for r in rs], ["A", "tie", "B"])
+        self.assertIsNone(rs[1]["winner"])
+
+    def test_store_carries_ui_version(self):
+        dump = [{"id": "u", "data": {"ballots": {"n": {"version": VER, "ui": 2, "vw": 375, "picks": {"1": {"pick": "a"}}},
+                                                 "o": {"version": VER, "picks": {"2": {"pick": "b"}}}}}}]
+        rs = ev.from_store(dump, self.SETS, [])
+        self.assertEqual([(r["ballot"], r["ui"], r["vw"]) for r in rs], [("n", 2, 375), ("o", 1, None)])
+
+    def test_pick_time_is_carried(self):
+        dump = [{"id": "u", "data": {"ballots": {"n": {"version": VER, "picks": {
+            "1": {"pick": "a", "at": "2026-11-02T21:03:00.979Z"}, "2": {"pick": "b"}}}}}}]
+        self.assertEqual([r["ts"] for r in ev.from_store(dump, self.SETS, [])], ["2026-11-02T21:03:00.979Z", None])
+        rows = [{"id": 1, "ballot": "p", "pid": 1, "pick": "a", "version": VER, "at": "2026-11-02T21:04:00Z"},
+                {"id": 2, "ballot": "p", "pid": 2, "pick": "b", "version": VER, "created_at": "2026-11-02T21:05:00+00:00"}]
+        self.assertEqual([r["ts"] for r in ev.from_public(rows, self.SETS, [])],
+                         ["2026-11-02T21:04:00Z", "2026-11-02T21:05:00+00:00"])
+        text = f"FLM1:{VER[:8]}:abc123:bt"
+        self.assertEqual({r["ts"] for r in ev.from_codes(text, self.SETS, [])}, {None})
+
+    def test_store_accepts_documents_wrapper(self):
+        self.assertEqual(len(ev.from_store({"documents": self.DUMP}, self.SETS, [])), 3)
+
+    def test_codes(self):
+        text = f"hi! my code FLM1:{VER[:8]}:abc123:bt and again FLM1:{VER[:8]}:abc123:bt FLM1:deadbeef:zz:ab"
+        dropped = []
+        rs = ev.from_codes(text, self.SETS, dropped)
+        self.assertEqual([(r["pid"], r["vote"], r["winner"]) for r in rs], [(1, "B", "sys-k"), (2, "tie", None)])
+        self.assertEqual(len(dropped), 1)  # unknown version; the duplicate paste is ignored, not dropped
+
+    def test_public_rows_latest_wins(self):
+        rows = [{"id": 1, "ballot": "p1", "pid": 1, "pick": "a", "version": VER, "ui": 3, "vw": 390},
+                {"id": 2, "ballot": "p1", "pid": 2, "pick": "tie", "version": VER},
+                {"id": 3, "ballot": "p1", "pid": 1, "pick": "b", "reason": "changed my mind", "version": VER},
+                {"id": 4, "ballot": "p2", "pid": 1, "pick": "a", "version": "nope"}]
+        dropped = []
+        rs = ev.from_public(rows, self.SETS, dropped)
+        self.assertEqual([(r["ballot"], r["pid"], r["vote"], r["reason"]) for r in rs],
+                         [("pub:p1", 1, "B", "changed my mind"), ("pub:p1", 2, "tie", "")])
+        self.assertEqual({r["source"] for r in rs}, {"public"})
+        self.assertEqual(len(dropped), 1)
+
+    def test_local_storage_dump(self):
+        saved = {"ballot": "b2", "local": self.DUMP[0]["data"]}
+        rs = ev.from_local(saved, self.SETS, [], "venue-mac")
+        self.assertEqual(len(rs), 3)
+        self.assertEqual({r["source"] for r in rs}, {"local"})
+        self.assertEqual(rs[0]["ballot"], "venue-mac:b1")
+
+    def test_local_beats_duplicate_code(self):
+        with tempfile.TemporaryDirectory() as d:
+            ab, pub = os.path.join(d, "ab.json"), os.path.join(d, "pub.json")
+            loc, codes, out = (os.path.join(d, n) for n in ("mac.json", "codes.txt", "out.jsonl"))
+            with open(loc, "w") as f: json.dump(json.dumps({"ballot": "bxyz123", "local": {"ballots": {
+                "bxyz123": {"version": VER, "picks": {"1": {"pick": "a"}, "2": {"pick": "b"}}}}}}), f)  # copy() gives a string
+            with open(codes, "w") as f: f.write(f"FLM1:{VER[:8]}:xyz123:ab FLM1:{VER[:8]}:other1:tt")
+            orig = ev.load_sets
+            ev.load_sets = lambda revs, extra=(): self.SETS
+            try:
+                self.assertEqual(ev.main(["--local", loc, "--codes", codes, "--out", out]), 0)
+            finally:
+                ev.load_sets = orig
+            with open(out) as f: rows = [json.loads(l) for l in f]
+            self.assertEqual(sorted({r["source"] for r in rows}), ["code", "local"])
+            self.assertEqual(len(rows), 4)  # 2 local + 2 from the other code; the duplicate code is skipped
+
+    def test_telegram_groups_map_through_pairs(self):
+        votes = {"votes": [{"pid": 1, "choice": "X", "version": VER, "voter_hash": "h1"},   # X = sys-k = pair 1's b
+                           {"pid": 2, "choice": "X", "version": VER, "voter_hash": "h1"},   # X = sys-k = pair 2's a
+                           {"pid": 2, "choice": "Y", "version": VER, "voter_hash": "h1"},   # duplicate: first kept
+                           {"pid": 1, "choice": "both_bad", "version": VER, "voter_hash": "h2"},
+                           {"pid": 1, "choice": "X", "version": "nope", "voter_hash": "h3"}]}
+        dropped = []
+        rs = ev.from_telegram(votes, self.SETS, dropped)
+        self.assertEqual([(r["ballot"], r["pid"], r["vote"], r["winner"]) for r in rs],
+                         [("tg:h1", 1, "B", "sys-k"), ("tg:h1", 2, "A", "sys-k"), ("tg:h2", 1, "both_bad", None)])
+        self.assertEqual(len(dropped), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

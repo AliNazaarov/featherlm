@@ -1,0 +1,12 @@
+requests
+numpy
+matplotlib
+anthropic
+openai
+python-dotenv
+truststore
+nbformat
+nbconvert
+nbclient
+scipy
+ipykernel
